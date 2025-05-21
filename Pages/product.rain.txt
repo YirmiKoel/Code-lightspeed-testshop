@@ -1,0 +1,161 @@
+{% set metadata = {
+  id: product.id,
+  vid: product.vid,
+  variant: ((product.variant | lower) == "default" ? '' : product.variant),
+  title: product.title,
+  price: product.price,
+  image: (product.image ? (product.image | url_image(imageSize)) : '')
+} | json_encode(constant('JSON_HEX_APOS')) %}
+
+{% set productFeatures = {} %}
+{% set productAsABundle = 'bundle:' in product.data_01 | lower %}
+{% set productAsABundleType = ('shoplightspeed' in shop.domains.static) ? 'related' : theme.bundles_type %}
+
+{# Determine product title #}
+{% set productTitle = theme.show_fulltitle ? product.fulltitle : product.title %}
+
+{# determine specific stock status #}
+{% set stockText = 'In stock' %}
+{% set stockType = 'in-stock' %}
+{% if product.stock.track %}
+  {% if not product.stock.available and not product.stock.on_stock %}
+    {% set stockText = 'Out of stock' %}
+    {% set stockType = 'out-of-stock' %}
+  {% elseif product.stock.available and not product.stock.on_stock %}
+    {% set stockText = 'Backorder' %}
+    {% set stockType = 'backorder' %}
+  {% endif %}
+{% endif %}
+
+{# Product price determination #}
+{% set productPrice     = productAsABundle and product.bundles ? product.bundles[0].price.price      : product.price.price %}
+{% set productPriceIncl = productAsABundle and product.bundles ? product.bundles[0].price.price_incl : product.price.price_incl %}
+{% set productPriceExcl = productAsABundle and product.bundles ? product.bundles[0].price.price_excl : product.price.price_excl %}
+{% set priceOld        = product.price.price_old %}
+{% set priceOldIncl    = product.price.price_old_incl %}
+{% set priceOldExcl    = product.price.price_old_excl %}
+
+{# Parse Data 01 parameters #}
+{% if product.data_01 != '' %}
+  {% set params = product.data_01 | split('|') %}
+  {% for paramGroup in params %}
+    {% set parts = paramGroup | split(':') %}
+    {% set key   = parts[0] | trim | lower %}
+    {% set val   = (parts[1] ?: parts[0]) | trim %}
+    {% set productFeatures = productFeatures | merge({ (key): val }) %}
+  {% endfor %}
+{% endif %}
+
+{% set bulk_variants = ((theme.b2b_product_bulk_variants or request.get.bulk_variants == 1) or productFeatures['bulk_variants']) 
+                       and productFeatures['bulk_variants'] != 'false' %}
+{% set first_spec     = product.specs | first %}
+{% set isPriceFrom    = false %}
+{% set lowestPrice    = product.price.price %}
+{% set highestPrice   = product.price.price %}
+{% if bulk_variants %}
+  {% for v in product.variants | sort((a, b) => a.price.price <=> b.price.price) %}
+    {% if loop.first %} {% set lowestPrice = v.price.price %} {% endif %}
+    {% if loop.last  %} {% set highestPrice = v.price.price %} {% endif %}
+  {% endfor %}
+  {% set isPriceFrom = lowestPrice != highestPrice %}
+{% endif %}
+
+{# Calculator data #}
+{% set capacity   = product.description | split('[capacity]')[1] %}
+{% if capacity %}
+  {% set product = product | merge({ 'description': product.description | split('[description]')[1] }) %}
+  {% include 'snippets/product-calculator.rain' with {'value': capacity} %}
+{% endif %}
+
+{# Sticky Add-to-cart balk (desktop) #}
+{% if not productAsABundle and theme.enable_sticky_addtocart and product.stock.available %}
+  <div class="addtocart-sticky">
+    <div class="container d-flex align-items-center">
+      <img src="{{ product.image | url_image(imageThumbSize) }}" alt="" width="42" height="42" class="mr-3">
+      <h5 class="d-none d-sm-block">{{ productTitle }}</h5>
+      <div class="sticky-price flex-grow-1 text-right mr-3 nowrap">
+        {% if priceOld %}
+          <span class="price-old">{{ priceOld | money_without_currency }}</span>
+        {% endif %}
+        <span class="price bold fz-120">{{ productPrice | money_without_currency }}</span>
+        <span class="fz-080 vat-text">{{ shop.b2b ? 'Excl. VAT' : 'Incl. VAT' | t }}</span>
+      </div>
+      <a href="{{ ('cart/add/'~product.vid)|url }}" 
+         data-metadata='{{ metadata|raw }}'
+         class="button button-cta button-medium nowrap trigger-add-to-cart">
+        <span class="d-none d-sm-block">{{ 'Add to cart' | t }}</span>
+        <i class="icon-{{ theme.cart_icon }} d-block d-sm-none fz-180"></i>
+      </a>
+    </div>
+  </div>
+{% endif %}
+
+<div class="container productpage">
+
+  {# ==== Mobiele header met sterren ==== #}
+  <div class="fz-150 font-headings d-md-none">{{ productTitle }}</div>
+  <div class="title-appendix d-flex d-md-none mb-3 align-items-center">
+    {% if product.brand and theme.show_product_brands %}
+      <a href="{{ product.brand.url | url }}" class="brand-label">{{ product.brand.title }}</a>
+      <div class="v-sep"></div>
+    {% endif %}
+    {% if theme.yotpo_id %}
+      <div data-scrollview-id="reviews" data-scrollview-offset="-150"
+           class="yotpo bottomLine html_content"
+           data-appkey="{{ theme.yotpo_id }}"
+           data-domain="{{ shop.domain }}"
+           data-product-id="{{ product[theme.yotpo_product_identifier] }}"
+           data-product-models="{{ product.id }}"
+           data-name="{{ product.title }}"
+           data-url="{{ product.url | url }}"
+           data-image-url="{{ product.image | url_image }}"
+           data-description="{{ product.description }}"
+           data-bread-crumbs="{{ breadcrumb.title }}">
+      </div>
+    {% elseif theme.setting_reviews %}
+      <div class="d-inline-block d-md-none">
+        {% include 'rating' with { rating: product.score } %}
+      </div>
+      <a href="#reviews" data-scrollview-id="reviews" data-scrollview-offset="-150"
+         class="highlight-txt fz-090">({{ product.reviews|length }})</a>
+    {% endif %}
+  </div>
+
+  <div class="row">
+    <div class="col-12 col-md-6 productpage-left">
+      {% include 'snippets/product-images.rain' %}
+    </div>
+    <div class="col-12 col-md-6 productpage-right mt-3 mt-md-0">
+      {% include 'snippets/product-summary.rain' %}
+    </div>
+  </div>
+
+  {% include 'snippets/product-details.rain' %}
+
+  {# ==== Desktop Reviews-blok ==== #}
+  {% if theme.setting_reviews and not theme.yotpo_id %}
+    <div class="product-reviews mt-4" id="reviews">
+      <h3 class="pp-section-title py-2 mb-2">
+        {{ 'Reviews' | t }}
+      </h3>
+      <div class="toggle-content toggle-content-md d-flex align-items-center mb-3">
+        <div class="mr-3">
+          {% include 'rating' with { rating: product.score } %}
+        </div>
+        <a href="#write-review"
+           class="button button-medium button-lined-soft nowrap ml-auto"
+           data-fancy-id="fancy-write-review"
+           data-trigger-fancy="fancy-write-review">
+          {{ 'Schrijf een review' | t }}
+        </a>
+      </div>
+      <div class="toggle-content toggle-content-md">
+        {% include 'snippets/product-reviews.rain' with {'limit': 3} %}
+      </div>
+    </div>
+  {% endif %}
+
+  {% include 'snippets/related-products.rain' %}
+</div>
+
+{# … (rest van de modals en footers onveranderd) … #}
